@@ -11,6 +11,9 @@ typealias FfiPosition = AutomergeUniffi.Position
 /// ``Document/cursorPositionAt(obj:cursor:heads:)`` to get the cursor position at a previous point in time.
 public struct Cursor: Equatable, Hashable, Sendable {
     var bytes: [UInt8]
+    public init(bytes: [UInt8]) {
+        self.bytes = bytes
+    }
 }
 
 extension Cursor: CustomStringConvertible {
