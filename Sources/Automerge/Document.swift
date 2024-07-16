@@ -16,14 +16,24 @@ public final class Document: @unchecked Sendable {
     private var doc: WrappedDoc
 
     #if !os(WASI)
-    fileprivate let queue = DispatchQueue(label: "automerge-sync-queue", qos: .userInteractive)
-    fileprivate func sync<T>(execute work: () throws -> T) rethrows -> T {
-        try queue.sync(execute: work)
+    let lock = NSRecursiveLock()
+    fileprivate func lock<T>(execute work: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try work()
     }
     #else
-    fileprivate func sync<T>(execute work: () throws -> T) rethrows -> T {
+    fileprivate func lock<T>(execute work: () throws -> T) rethrows -> T {
         try work()
     }
+    #endif
+
+    #if canImport(Combine)
+    /// A publisher that sends a signal after the document is updated.
+    ///
+    /// You can use the signal from this publisher to read the and record ``Document/heads()``
+    /// to get the state indicator of the document after the change is complete.
+    public let objectDidChange: PassthroughSubject<Void, Never> = .init()
     #endif
 
     var reportingLogLevel: LogVerbosity
@@ -31,12 +41,12 @@ public final class Document: @unchecked Sendable {
     /// The actor ID of this document
     public var actor: ActorId {
         get {
-            sync {
+            lock {
                 ActorId(ffi: self.doc.wrapErrors { $0.actorId() })
             }
         }
         set {
-            sync {
+            lock {
                 self.doc.wrapErrors { $0.setActor(actor: [UInt8](newValue.data)) }
             }
         }
@@ -82,8 +92,9 @@ public final class Document: @unchecked Sendable {
     /// amount,
     /// use the method ``increment(obj:key:by:)`` instead.
     public func put(obj: ObjId, key: String, value: ScalarValue) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.putInMap(obj: obj.bytes, key: key, value: value.toFfi())
             }
@@ -105,8 +116,9 @@ public final class Document: @unchecked Sendable {
     /// amount,
     /// use the method ``increment(obj:key:by:)`` instead.
     public func put(obj: ObjId, index: UInt64, value: ScalarValue) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.putInList(obj: obj.bytes, index: index, value: value.toFfi())
             }
@@ -121,9 +133,10 @@ public final class Document: @unchecked Sendable {
     ///   - ty: The type of object to add to the dictionary.
     /// - Returns: The object Id that references the object added.
     public func putObject(obj: ObjId, key: String, ty: ObjType) throws -> ObjId {
-        sendObjectWillChange()
-        return try sync {
-            try self.doc.wrapErrors {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return try self.doc.wrapErrors {
                 try ObjId(bytes: $0.putObjectInMap(obj: obj.bytes, key: key, objType: ty.toFfi()))
             }
         }
@@ -140,9 +153,10 @@ public final class Document: @unchecked Sendable {
     /// If the index position doesn't yet exist within the array, this method will throw an error.
     /// To add an object that extends the array, use the method ``insertObject(obj:index:ty:)``.
     public func putObject(obj: ObjId, index: UInt64, ty: ObjType) throws -> ObjId {
-        sendObjectWillChange()
-        return try sync {
-            try self.doc.wrapErrors {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return try self.doc.wrapErrors {
                 try ObjId(bytes: $0.putObjectInList(obj: obj.bytes, index: index, objType: ty.toFfi()))
             }
         }
@@ -155,8 +169,9 @@ public final class Document: @unchecked Sendable {
     ///   - index: The index value of the array to update.
     ///   - value: The value to insert for the index you provide.
     public func insert(obj: ObjId, index: UInt64, value: ScalarValue) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.insertInList(obj: obj.bytes, index: index, value: value.toFfi())
             }
@@ -175,9 +190,10 @@ public final class Document: @unchecked Sendable {
     /// If you want to change an existing index, use the ``putObject(obj:index:ty:)`` to put in an object or
     /// ``put(obj:index:value:)`` to put in a value.
     public func insertObject(obj: ObjId, index: UInt64, ty: ObjType) throws -> ObjId {
-        sendObjectWillChange()
-        return try sync {
-            try self.doc.wrapErrors {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return try self.doc.wrapErrors {
                 try ObjId(bytes: $0.insertObjectInList(obj: obj.bytes, index: index, objType: ty.toFfi()))
             }
         }
@@ -188,8 +204,9 @@ public final class Document: @unchecked Sendable {
     ///   - obj: The identifier of the dictionary to update.
     ///   - key: The key to delete.
     public func delete(obj: ObjId, key: String) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.deleteInMap(obj: obj.bytes, key: key)
             }
@@ -204,8 +221,9 @@ public final class Document: @unchecked Sendable {
     ///
     /// This method shrinks the length of the array object.
     public func delete(obj: ObjId, index: UInt64) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.deleteInList(obj: obj.bytes, index: index)
             }
@@ -219,8 +237,9 @@ public final class Document: @unchecked Sendable {
     ///   - key: The key in the dictionary object that references the counter.
     ///   - by: The amount to increment, or decrement, the counter.
     public func increment(obj: ObjId, key: String, by: Int64) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.incrementInMap(obj: obj.bytes, key: key, by: by)
             }
@@ -234,8 +253,9 @@ public final class Document: @unchecked Sendable {
     ///   - index: The index position in the array object that references the counter.
     ///   - by: The amount to increment, or decrement, the counter.
     public func increment(obj: ObjId, index: UInt64, by: Int64) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.incrementInList(obj: obj.bytes, index: index, by: by)
             }
@@ -255,7 +275,7 @@ public final class Document: @unchecked Sendable {
     /// will return one of them  arbitrarily (but deterministically). If you
     /// need all the conflicting values see ``getAll(obj:key:)``
     public func get(obj: ObjId, key: String) throws -> Value? {
-        try sync {
+        try lock {
             let val = try self.doc.wrapErrors { try $0.getInMap(obj: obj.bytes, key: key) }
             return val.map(Value.fromFfi)
         }
@@ -274,7 +294,7 @@ public final class Document: @unchecked Sendable {
     /// will return one of them  arbitrarily (but deterministically). If you
     /// need all the conflicting values see ``getAll(obj:index:)``
     public func get(obj: ObjId, index: UInt64) throws -> Value? {
-        try sync {
+        try lock {
             let val = try self.doc.wrapErrors { try $0.getInList(obj: obj.bytes, index: index) }
             return val.map(Value.fromFfi)
         }
@@ -287,7 +307,7 @@ public final class Document: @unchecked Sendable {
     ///   - key: The key within the dictionary.
     /// - Returns: A set of value objects.
     public func getAll(obj: ObjId, key: String) throws -> Set<Value> {
-        try sync {
+        try lock {
             let vals = try self.doc.wrapErrors { try $0.getAllInMap(obj: obj.bytes, key: key) }
             return Set(vals.map { Value.fromFfi(value: $0) })
         }
@@ -302,7 +322,7 @@ public final class Document: @unchecked Sendable {
     ///
     /// If you request a index beyond the bounds of the array, this method throws an error.
     public func getAll(obj: ObjId, index: UInt64) throws -> Set<Value> {
-        try sync {
+        try lock {
             let vals = try self.doc.wrapErrors { try $0.getAllInList(obj: obj.bytes, index: index) }
             return Set(vals.map { Value.fromFfi(value: $0) })
         }
@@ -325,7 +345,7 @@ public final class Document: @unchecked Sendable {
     public func getAt(obj: ObjId, key: String, heads: Set<ChangeHash>) throws
         -> Value?
     {
-        try sync {
+        try lock {
             let val = try self.doc.wrapErrors {
                 try $0.getAtInMap(obj: obj.bytes, key: key, heads: heads.map(\.bytes))
             }
@@ -349,7 +369,7 @@ public final class Document: @unchecked Sendable {
     public func getAt(obj: ObjId, index: UInt64, heads: Set<ChangeHash>) throws
         -> Value?
     {
-        try sync {
+        try lock {
             let val = try self.doc.wrapErrors {
                 try $0.getAtInList(obj: obj.bytes, index: index, heads: heads.map(\.bytes))
             }
@@ -371,7 +391,7 @@ public final class Document: @unchecked Sendable {
     public func getAllAt(obj: ObjId, key: String, heads: Set<ChangeHash>) throws
         -> Set<Value>
     {
-        try sync {
+        try lock {
             let vals = try self.doc.wrapErrors {
                 try $0.getAllAtInMap(obj: obj.bytes, key: key, heads: heads.map(\.bytes))
             }
@@ -391,7 +411,7 @@ public final class Document: @unchecked Sendable {
     public func getAllAt(obj: ObjId, index: UInt64, heads: Set<ChangeHash>)
         throws -> Set<Value>
     {
-        try sync {
+        try lock {
             let vals = try self.doc.wrapErrors {
                 try $0.getAllAtInList(obj: obj.bytes, index: index, heads: heads.map(\.bytes))
             }
@@ -404,7 +424,7 @@ public final class Document: @unchecked Sendable {
     /// - Parameter obj: The identifier of the dictionary object.
     /// - Returns: The keys for that dictionary.
     public func keys(obj: ObjId) -> [String] {
-        sync {
+        lock {
             self.doc.wrapErrors { $0.mapKeys(obj: obj.bytes) }
         }
     }
@@ -418,7 +438,7 @@ public final class Document: @unchecked Sendable {
     ///
     /// Use the method ``heads()`` to capture a specific point in time in order to use this method.
     public func keysAt(obj: ObjId, heads: Set<ChangeHash>) -> [String] {
-        sync {
+        lock {
             self.doc.wrapErrors { $0.mapKeysAt(obj: obj.bytes, heads: heads.map(\.bytes)) }
         }
     }
@@ -429,7 +449,7 @@ public final class Document: @unchecked Sendable {
     /// - Returns: For an array object, the list of all current values.
     /// For a dictionary object, the list of the values for all the keys.
     public func values(obj: ObjId) throws -> [Value] {
-        try sync {
+        try lock {
             let vals = try self.doc.wrapErrors { try $0.values(obj: obj.bytes) }
             return vals.map { Value.fromFfi(value: $0) }
         }
@@ -445,7 +465,7 @@ public final class Document: @unchecked Sendable {
     ///
     /// Use the method ``heads()`` to capture a specific point in time in order to use this method.
     public func valuesAt(obj: ObjId, heads: Set<ChangeHash>) throws -> [Value] {
-        try sync {
+        try lock {
             let vals = try self.doc.wrapErrors {
                 try $0.valuesAt(obj: obj.bytes, heads: heads.map(\.bytes))
             }
@@ -459,7 +479,7 @@ public final class Document: @unchecked Sendable {
     /// - Returns: An array of `(String, Value)` that represents the key and value combinations of the dictionary
     /// object.
     public func mapEntries(obj: ObjId) throws -> [(String, Value)] {
-        try sync {
+        try lock {
             let entries = try self.doc.wrapErrors { try $0.mapEntries(obj: obj.bytes) }
             return entries.map { ($0.key, Value.fromFfi(value: $0.value)) }
         }
@@ -474,7 +494,7 @@ public final class Document: @unchecked Sendable {
     public func mapEntriesAt(obj: ObjId, heads: Set<ChangeHash>) throws -> [(
         String, Value
     )] {
-        try sync {
+        try lock {
             let entries = try self.doc.wrapErrors {
                 try $0.mapEntriesAt(obj: obj.bytes, heads: heads.map(\.bytes))
             }
@@ -486,7 +506,7 @@ public final class Document: @unchecked Sendable {
     ///
     /// - Parameter obj: The identifier of an array, dictionary, or text object.
     public func length(obj: ObjId) -> UInt64 {
-        sync {
+        lock {
             self.doc.wrapErrors { $0.length(obj: obj.bytes) }
         }
     }
@@ -497,7 +517,7 @@ public final class Document: @unchecked Sendable {
     ///   - obj: The identifier of an array, dictionary, or text object.
     ///   - heads: The set of ``ChangeHash`` that represents a point of time in the history the document.
     public func lengthAt(obj: ObjId, heads: Set<ChangeHash>) -> UInt64 {
-        sync {
+        lock {
             self.doc.wrapErrors { $0.lengthAt(obj: obj.bytes, heads: heads.map(\.bytes)) }
         }
     }
@@ -506,7 +526,7 @@ public final class Document: @unchecked Sendable {
     ///
     /// - Parameter obj: The identifier of an array, dictionary, or text object.
     public func objectType(obj: ObjId) -> ObjType {
-        sync {
+        lock {
             self.doc.wrapErrors {
                 ObjType.fromFfi(ty: $0.objectType(obj: obj.bytes))
             }
@@ -518,7 +538,7 @@ public final class Document: @unchecked Sendable {
     /// - Parameter obj: The identifier of a text object.
     /// - Returns: The current string value that the text object contains.
     public func text(obj: ObjId) throws -> String {
-        try sync {
+        try lock {
             try self.doc.wrapErrors { try $0.text(obj: obj.bytes) }
         }
     }
@@ -530,7 +550,7 @@ public final class Document: @unchecked Sendable {
     ///   - heads: The set of ``ChangeHash`` that represents a point of time in the history the document.
     /// - Returns: The string value that the text object contains at the point in time you specify.
     public func textAt(obj: ObjId, heads: Set<ChangeHash>) throws -> String {
-        try sync {
+        try lock {
             try self.doc.wrapErrors { try $0.textAt(obj: obj.bytes, heads: heads.map(\.bytes)) }
         }
     }
@@ -542,9 +562,10 @@ public final class Document: @unchecked Sendable {
     ///   - position: The index position in the list, or index of the UTF-8 view in the string for a text object.
     /// - Returns: A cursor that references the position you specified.
     public func cursor(obj: ObjId, position: UInt64) throws -> Cursor {
-        sendObjectWillChange()
-        return try sync {
-            try Cursor(bytes: self.doc.wrapErrors { try $0.cursor(obj: obj.bytes, position: position) })
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return try Cursor(bytes: self.doc.wrapErrors { try $0.cursor(obj: obj.bytes, position: position) })
         }
     }
 
@@ -556,9 +577,10 @@ public final class Document: @unchecked Sendable {
     ///   - heads: The set of ``ChangeHash`` that represents a point of time in the history the document.
     /// - Returns: A cursor that references the position and point in time you specified.
     public func cursorAt(obj: ObjId, position: UInt64, heads: Set<ChangeHash>) throws -> Cursor {
-        sendObjectWillChange() // this may not be correct
-        return try sync {
-            try Cursor(bytes: self.doc.wrapErrors { try $0.cursorAt(
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return try Cursor(bytes: self.doc.wrapErrors { try $0.cursorAt(
                 obj: obj.bytes,
                 position: position,
                 heads: heads.map(\.bytes)
@@ -573,7 +595,7 @@ public final class Document: @unchecked Sendable {
     ///   - cursor: The cursor created for this list or text object
     /// - Returns: The index position of a list, or the index position of the UTF-8 view in the string, of the cursor.
     public func cursorPosition(obj: ObjId, cursor: Cursor) throws -> UInt64 {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try $0.cursorPosition(obj: obj.bytes, cursor: cursor.bytes)
             }
@@ -588,7 +610,7 @@ public final class Document: @unchecked Sendable {
     ///   - heads: The set of ``ChangeHash`` that represents a point of time in the history the document.
     /// - Returns: The index position of a list, or the index position of the UTF-8 view in the string, of the cursor.
     public func cursorPositionAt(obj: ObjId, cursor: Cursor, heads: Set<ChangeHash>) throws -> UInt64 {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try $0.cursorPositionAt(obj: obj.bytes, cursor: cursor.bytes, heads: heads.map(\.bytes))
             }
@@ -604,8 +626,9 @@ public final class Document: @unchecked Sendable {
     ///   If negative, the function deletes elements preceding `start` index, rather than following it.
     ///   - values: An array of values to insert after the `start` index.
     public func splice(obj: ObjId, start: UInt64, delete: Int64, values: [ScalarValue]) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.splice(
                     obj: obj.bytes, start: start, delete: delete, values: values.map { $0.toFfi() }
@@ -622,7 +645,7 @@ public final class Document: @unchecked Sendable {
     /// deleting.
     ///   - delete: The number of unicode scalars to delete from the `start` index.
     ///   If negative, the function deletes characters preceding `start` index, rather than following it.
-    ///   - values: The characters to insert after the `start` index.
+    ///   - value: The characters to insert after the `start` index.
     ///
     /// With `spliceText`, the `start` and `delete` parameters represent integer distances of unicode scalars of the
     /// Swift strings, not the counts of Characters (or grapheme clusters).
@@ -654,8 +677,9 @@ public final class Document: @unchecked Sendable {
     /// Int64("🇬🇧".unicodeScalars.count)
     /// ```
     public func spliceText(obj: ObjId, start: UInt64, delete: Int64, value: String? = nil) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.spliceText(obj: obj.bytes, start: start, delete: delete, chars: value ?? "")
             }
@@ -672,8 +696,9 @@ public final class Document: @unchecked Sendable {
     /// This method creates a diff of the text, using Grapheme clusters, to apply updates to change the stored text to
     /// what you provide.
     public func updateText(obj: ObjId, value: String) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors { doc in
                 try doc.updateText(obj: obj.bytes, chars: value)
             }
@@ -727,8 +752,9 @@ public final class Document: @unchecked Sendable {
         name: String,
         value: ScalarValue
     ) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.mark(
                     obj: obj.bytes,
@@ -747,7 +773,7 @@ public final class Document: @unchecked Sendable {
     /// - Parameter obj: The identifier of the text object.
     /// - Returns: The current list of ``Mark`` for the text object.
     public func marks(obj: ObjId) throws -> [Mark] {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try $0.marks(obj: obj.bytes).map(Mark.fromFfi)
             }
@@ -761,7 +787,7 @@ public final class Document: @unchecked Sendable {
     ///   - heads: The set of ``ChangeHash`` that represents a point of time in the history the document.
     /// - Returns: A list of ``Mark`` for the text object at the point in time you specify.
     public func marksAt(obj: ObjId, heads: Set<ChangeHash>) throws -> [Mark] {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try $0.marksAt(obj: obj.bytes, heads: heads.map(\.bytes)).map(Mark.fromFfi)
             }
@@ -775,7 +801,8 @@ public final class Document: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - obj: The identifier of the text object, represented by an ``ObjId``.
-    ///   - position: The position within the text, represented by a ``Position`` enum which can be a ``Cursor`` or an `UInt64` as a fixed position.
+    ///   - position: The position within the text, represented by a ``Position`` enum which can be a ``Cursor`` or an
+    /// `UInt64` as a fixed position.
     ///   - heads: A set of `ChangeHash` values that represents a point in time in the document's history.
     /// - Returns: An array of `Mark` objects for the text object at the specified position.
     ///
@@ -789,23 +816,29 @@ public final class Document: @unchecked Sendable {
     /// ```
     ///
     /// ## Recommendation
+    ///
     /// Use this method to query the marks applied to a text object at a specific position.
-    /// This can be useful for retrieving ``Marks`` related to a character without traversing the full document.
+    /// This can be useful for retrieving the list of ``Automerge/Mark`` related to a character without
+    /// traversing the full document.
     ///
     /// ## When to Use Cursor vs. Index
     ///
     /// While you can specify the position either with a `Cursor` or an `Index`, there are important distinctions:
     ///
-    /// - **Cursor**: Use a `Cursor` when you need to track a position that might change over time due to edits in the text object. A `Cursor` provides a way to maintain a reference to a logical position within the text even if the text content changes, making it more robust in collaborative or frequently edited documents.
+    /// - **Cursor**: Use a `Cursor` when you need to track a position that might change over time due to edits in the
+    /// text object. A `Cursor` provides a way to maintain a reference to a logical position within the text even if the
+    /// text content changes, making it more robust in collaborative or frequently edited documents.
     ///
-    /// - **Index**: Use an `Index` when you have a fixed position and you are sure that the text content will not change, or changes are irrelevant to your current operation. An index is a straightforward approach for static text content.
+    /// - **Index**: Use an `Index` when you have a fixed position and you are sure that the text content will not
+    /// change, or changes are irrelevant to your current operation. An index is a straightforward approach for static
+    /// text content.
     ///
     /// # See Also
     /// ``marksAt(obj:position:)``
     /// ``marksAt(obj:heads:)``
     ///
     public func marksAt(obj: ObjId, position: Position, heads: Set<ChangeHash>) throws -> [Mark] {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try $0.marksAtPosition(
                     obj: obj.bytes,
@@ -823,7 +856,8 @@ public final class Document: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - obj: The identifier of the text object, represented by an ``ObjId``.
-    ///   - position: The position within the text, represented by a ``Position`` enum which can be a ``Cursor`` or an `UInt64` as a fixed position.
+    ///   - position: The position within the text, represented by a ``Position`` enum which can be a ``Cursor`` or an
+    /// `UInt64` as a fixed position.
     /// - Returns: An array of `Mark` objects for the text object at the specified position.
     /// - Note: This method retrieves marks from the latest version of the document.
     /// If you need to specify a point in the document's history, refer to ``marksAt(obj:position:heads:)``.
@@ -839,15 +873,20 @@ public final class Document: @unchecked Sendable {
     ///
     /// ## Recommendation
     /// Use this method to query the marks applied to a text object at a specific position.
-    /// This can be useful for retrieving ``Marks`` related to a character without traversing the full document.
+    /// This can be useful for retrieving the list of ``Automerge/Mark`` related to a character without
+    /// traversing the full document.
     ///
     /// ## When to Use Cursor vs. Index
     ///
     /// While you can specify the position either with a `Cursor` or an `Index`, there are important distinctions:
     ///
-    /// - **Cursor**: Use a `Cursor` when you need to track a position that might change over time due to edits in the text object. A `Cursor` provides a way to maintain a reference to a logical position within the text even if the text content changes, making it more robust in collaborative or frequently edited documents.
+    /// - **Cursor**: Use a `Cursor` when you need to track a position that might change over time due to edits in the
+    /// text object. A `Cursor` provides a way to maintain a reference to a logical position within the text even if the
+    /// text content changes, making it more robust in collaborative or frequently edited documents.
     ///
-    /// - **Index**: Use an `Index` when you have a fixed position and you are sure that the text content will not change, or changes are irrelevant to your current operation. An index is a straightforward approach for static text content.
+    /// - **Index**: Use an `Index` when you have a fixed position and you are sure that the text content will not
+    /// change, or changes are irrelevant to your current operation. An index is a straightforward approach for static
+    /// text content.
     ///
     /// # See Also
     /// ``marksAt(obj:position:heads:)``
@@ -863,8 +902,9 @@ public final class Document: @unchecked Sendable {
     ///   - message: An optional message to attach to the auto-committed change (if any).
     ///   - timestamp: A timestamp to attach to the auto-committed change (if any), defaulting to Date().
     public func commitWith(message: String? = nil, timestamp: Date = Date()) {
-        sendObjectWillChange()
-        sync {
+        lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             self.doc.wrapErrors {
                 $0.commitWith(msg: message, time: Int64(timestamp.timeIntervalSince1970))
             }
@@ -878,9 +918,10 @@ public final class Document: @unchecked Sendable {
     /// The `save` function also compacts the memory footprint of an Automerge document and increments the result of
     /// ``heads()``, which indicates a specific point in time for the history of the document.
     public func save() -> Data {
-        sendObjectWillChange()
-        return sync {
-            self.doc.wrapErrors {
+        lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return self.doc.wrapErrors {
                 Data($0.save())
             }
         }
@@ -896,7 +937,7 @@ public final class Document: @unchecked Sendable {
     /// Use ``receiveSyncMessage(state:message:)`` to update the sync state with the state, and possibly changes, from
     /// the peer.
     public func generateSyncMessage(state: SyncState) -> Data? {
-        sync {
+        lock {
             self.doc.wrapErrors {
                 if let tempArr = $0.generateSyncMessage(state: state.ffi_state) {
                     return Data(tempArr)
@@ -915,8 +956,9 @@ public final class Document: @unchecked Sendable {
     /// > Tip: if you need to know what changed in the document as a result of
     /// the message use the function ``receiveSyncMessageWithPatches(state:message:)``.
     public func receiveSyncMessage(state: SyncState, message: Data) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.receiveSyncMessage(state: state.ffi_state, msg: Array(message))
             }
@@ -931,8 +973,9 @@ public final class Document: @unchecked Sendable {
     ///   - message: The message from the peer to update this document and sync state.
     /// - Returns: An array of ``Patch`` that represent the changes applied from the peer.
     public func receiveSyncMessageWithPatches(state: SyncState, message: Data) throws -> [Patch] {
-        sendObjectWillChange()
-        return try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             let patches = try self.doc.wrapErrors {
                 try $0.receiveSyncMessageWithPatches(state: state.ffi_state, msg: Array(message))
             }
@@ -944,7 +987,7 @@ public final class Document: @unchecked Sendable {
     ///
     /// - Returns: A copy of the document with a new actor ID.
     public func fork() -> Document {
-        sync {
+        lock {
             Document(doc: self.doc.wrapErrors { $0.fork() })
         }
     }
@@ -955,7 +998,7 @@ public final class Document: @unchecked Sendable {
     /// - Returns: A copy of the document with a new actor ID that contains the changes up to the point in time you
     /// specify.
     public func forkAt(heads: Set<ChangeHash>) throws -> Document {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try Document(doc: $0.forkAt(heads: heads.map(\.bytes)))
             }
@@ -969,8 +1012,9 @@ public final class Document: @unchecked Sendable {
     /// > Tip: If you need to know what changed in the document as a result of
     /// the merge, use the method ``mergeWithPatches(other:)`` instead.
     public func merge(other: Document) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrorsWithOther(other: other.doc) { try $0.merge(other: $1) }
         }
     }
@@ -980,8 +1024,9 @@ public final class Document: @unchecked Sendable {
     /// - Parameter other: another ``Document``
     /// - Returns: A list of ``Patch`` the represent the changes applied when merging the other document.
     public func mergeWithPatches(other: Document) throws -> [Patch] {
-        sendObjectWillChange()
-        return try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             let patches = try self.doc.wrapErrorsWithOther(other: other.doc) {
                 try $0.mergeWithPatches(other: $1)
             }
@@ -1011,7 +1056,7 @@ public final class Document: @unchecked Sendable {
     /// Instead Automerge encodes the heads of the tips of the change graph and re-computes internal hashes, which means
     /// there is no storage cost for these hashes.
     public func heads() -> Set<ChangeHash> {
-        sync {
+        lock {
             Set(self.doc.wrapErrors { $0.heads().map { ChangeHash(bytes: $0) } })
         }
     }
@@ -1020,14 +1065,14 @@ public final class Document: @unchecked Sendable {
     ///
     /// - Returns: An array of ``ChangeHash`` that represents the sequence of change hashes in the document.
     public func getHistory() -> [ChangeHash] {
-        sync {
+        lock {
             self.doc.wrapErrors { $0.changes().map { ChangeHash(bytes: $0) } }
         }
     }
 
     /// Returns the contents of the change associated with the change hash you provide.
     public func change(hash: ChangeHash) -> Change? {
-        sync {
+        lock {
             guard let change = self.doc.wrapErrors(f: { $0.changeByHash(hash: hash.bytes) }) else {
                 return nil
             }
@@ -1050,12 +1095,12 @@ public final class Document: @unchecked Sendable {
     /// ```
     ///
     /// - Parameters:
-    ///   - from: The set of heads at beginning point in the documents history.
-    ///   - to: The set of heads at ending point in the documents history.
+    ///   - before: The set of heads at beginning point in the documents history.
+    ///   - after: The set of heads at ending point in the documents history.
     /// - Note: `from` and `to` do not have to be chronological. Document state can move backward.
     /// - Returns: The difference needed to produce a document at `to` when it is set at `from` in history.
     public func difference(from before: Set<ChangeHash>, to after: Set<ChangeHash>) -> [Patch] {
-        sync {
+        lock {
             let patches = self.doc.wrapErrors { doc in
                 doc.difference(before: before.map(\.bytes), after: after.map(\.bytes))
             }
@@ -1072,7 +1117,7 @@ public final class Document: @unchecked Sendable {
     /// ```
     ///
     /// - Parameters:
-    ///     - since: The set of heads at the point in the documents history to compare to.
+    ///     - lhs: The set of heads at the point in the documents history to compare to.
     /// - Returns: The difference needed to produce current document given an arbitrary
     /// point in the history.
     public func difference(since lhs: Set<ChangeHash>) -> [Patch] {
@@ -1088,7 +1133,7 @@ public final class Document: @unchecked Sendable {
     /// ```
     ///
     /// - Parameters:
-    ///     - to: The set of heads at ending point in the documents history.
+    ///     - rhs: The set of heads at ending point in the documents history.
     /// - Returns: The difference needed to move current document to a previous point
     /// in the history.
     public func difference(to rhs: Set<ChangeHash>) -> [Patch] {
@@ -1100,7 +1145,7 @@ public final class Document: @unchecked Sendable {
     /// - Parameter obj: The identifier of an array, dictionary or text object.
     /// - Returns: An array of ``PathElement`` that represents the schema location of the object within the document.
     public func path(obj: ObjId) throws -> [PathElement] {
-        try sync {
+        try lock {
             let elems = try self.doc.wrapErrors { try $0.path(obj: obj.bytes) }
             return elems.map { PathElement.fromFfi($0) }
         }
@@ -1111,7 +1156,7 @@ public final class Document: @unchecked Sendable {
     /// - Returns: Encoded changes suitable for sending over the network and
     /// applying to another document using ``applyEncodedChanges(encoded:)``.
     public func encodeNewChanges() -> Data {
-        sync {
+        lock {
             self.doc.wrapErrors { Data($0.encodeNewChanges()) }
         }
     }
@@ -1122,7 +1167,7 @@ public final class Document: @unchecked Sendable {
     /// - Returns: Encoded changes suitable for sending over the network and
     /// applying to another document using ``applyEncodedChanges(encoded:)``.
     public func encodeChangesSince(heads: Set<ChangeHash>) throws -> Data {
-        try sync {
+        try lock {
             try self.doc.wrapErrors {
                 try Data($0.encodeChangesSince(heads: heads.map(\.bytes)))
             }
@@ -1140,8 +1185,9 @@ public final class Document: @unchecked Sendable {
     /// > Tip: if you need to know what changed in the document as a result of
     /// the applied changes try using ``applyEncodedChangesWithPatches(encoded:)``
     public func applyEncodedChanges(encoded: Data) throws {
-        sendObjectWillChange()
-        try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             try self.doc.wrapErrors {
                 try $0.applyEncodedChanges(changes: Array(encoded))
             }
@@ -1157,8 +1203,9 @@ public final class Document: @unchecked Sendable {
     /// ``encodeNewChanges()``, ``encodeChangesSince(heads:)`` or any
     /// concatenation of those.
     public func applyEncodedChangesWithPatches(encoded: Data) throws -> [Patch] {
-        sendObjectWillChange()
-        return try sync {
+        try lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
             let patches = try self.doc.wrapErrors {
                 try $0.applyEncodedChangesWithPatches(changes: Array(encoded))
             }
@@ -1223,9 +1270,14 @@ extension Document: ObservableObject {
 //        #endif
         objectWillChange.send()
     }
+
+    fileprivate func sendObjectDidChange() {
+        objectDidChange.send()
+    }
 }
 #else
 fileprivate extension Document {
     func sendObjectWillChange() {}
+    func sendObjectDidChange() {}
 }
 #endif
