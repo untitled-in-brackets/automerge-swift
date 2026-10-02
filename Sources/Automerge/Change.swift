@@ -7,6 +7,8 @@ typealias FfiChange = AutomergeUniffi.Change
 public struct Change: Equatable {
     /// The identity of the actor that made the change.
     public let actorId: ActorId
+    /// The author that made the change, if one was set on the document at the time.
+    public let author: Author?
     /// An optional message associated with the change.
     public let message: String?
     /// The list of changes that this change depends upon.
@@ -20,6 +22,7 @@ public struct Change: Equatable {
 
     init(_ ffi: FfiChange) {
         actorId = ActorId(ffi: ffi.actorId)
+        author = ffi.author.map(Author.init(ffi:))
         message = ffi.message
         deps = ffi.deps.map(ChangeHash.init(bytes:))
         timestamp = Date(timeIntervalSince1970: TimeInterval(ffi.timestamp))

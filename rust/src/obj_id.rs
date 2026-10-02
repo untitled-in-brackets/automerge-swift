@@ -14,7 +14,13 @@ impl From<ObjId> for automerge::ObjId {
 
 impl From<am::ObjId> for ObjId {
     fn from(value: am::ObjId) -> Self {
-        ObjId(value.to_bytes())
+        // trailing actor index is a doc-local lookup hint that shifts after merges;
+        // zero it so the same object always serializes identically (swift compares bytes)
+        let normalized = match value {
+            am::ObjId::Id(counter, actor, _) => am::ObjId::Id(counter, actor, 0),
+            root => root,
+        };
+        ObjId(normalized.to_bytes())
     }
 }
 
