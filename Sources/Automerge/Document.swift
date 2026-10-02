@@ -69,6 +69,46 @@ public final class Document: @unchecked Sendable {
         }
     }
 
+    /// The author recorded on changes this document makes, if any.
+    ///
+    /// Changing the author commits any pending changes and assigns the document a new ``ActorId``.
+    /// If you use authors, let Automerge manage ``actor`` rather than setting it yourself.
+    public var author: Author? {
+        get {
+            lock {
+                self.doc.wrapErrors { $0.author().map(Author.init(ffi:)) }
+            }
+        }
+        set {
+            lock {
+                self.doc.wrapErrors { $0.setAuthor(author: newValue?.ffi) }
+            }
+        }
+    }
+
+    /// Every author that has contributed a change to this document.
+    public var authors: [Author] {
+        lock {
+            self.doc.wrapErrors { $0.authors().map(Author.init(ffi:)) }
+        }
+    }
+
+    /// The actors that have made changes on behalf of an author.
+    ///
+    /// Returns an empty list if the author has no changes in this document.
+    public func actors(for author: Author) -> [ActorId] {
+        lock {
+            self.doc.wrapErrors { $0.actorsForAuthor(author: author.ffi).map(ActorId.init(ffi:)) }
+        }
+    }
+
+    /// The author an actor was acting for, if its changes were authored.
+    public func author(for actor: ActorId) -> Author? {
+        lock {
+            self.doc.wrapErrors { $0.authorForActor(actor: [UInt8](actor.data)).map(Author.init(ffi:)) }
+        }
+    }
+
     /// Retrieve the current text encoding used by the document.
     public var textEncoding: TextEncoding {
         lock {
@@ -79,10 +119,18 @@ public final class Document: @unchecked Sendable {
     /// Creates an new, empty Automerge document.
     /// - Parameters:
     ///   - textEncoding: The encoding type for text within the document. Defaults to `.unicodeCodePoint`.
+    ///   - author: The author to record on changes this document makes. Defaults to none.
     ///   - logLevel: The level at which to generate logs into unified logging from actions within this document.
-    public init(textEncoding: TextEncoding = .unicodeScalar, logLevel: LogVerbosity = .errorOnly) {
+    public init(
+        textEncoding: TextEncoding = .unicodeScalar,
+        author: Author? = nil,
+        logLevel: LogVerbosity = .errorOnly
+    ) {
         doc = WrappedDoc(Doc.newWithTextEncoding(textEncoding: textEncoding.ffi_textEncoding))
         self.reportingLogLevel = logLevel
+        if let author {
+            self.author = author
+        }
     }
 
     /// Creates a new document from the data that you provide.
@@ -94,10 +142,14 @@ public final class Document: @unchecked Sendable {
     /// any sequence of bytes containing valid encodings of automerge changes.
     /// - Parameters:
     ///   - bytes: A data buffer of encoded automerge changes.
+    ///   - author: The author to record on changes this document makes. Defaults to none.
     ///   - logLevel: The level at which to generate logs into unified logging from actions within this document.
-    public init(_ bytes: Data, logLevel: LogVerbosity = .errorOnly) throws {
+    public init(_ bytes: Data, author: Author? = nil, logLevel: LogVerbosity = .errorOnly) throws {
         doc = try WrappedDoc { try Doc.load(bytes: Array(bytes)) }
         self.reportingLogLevel = logLevel
+        if let author {
+            self.author = author
+        }
     }
 
     private init(doc: Doc, logLevel: LogVerbosity = .errorOnly) {
