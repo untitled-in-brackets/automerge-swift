@@ -87,6 +87,9 @@ public final class Document: @unchecked Sendable {
     }
 
     /// Every author that has contributed a change to this document.
+    ///
+    /// Reflects committed changes. Like ``heads()``, reading this commits any pending edits first,
+    /// so call ``commitWith(message:timestamp:)`` before it if you want a message on those edits.
     public var authors: [Author] {
         lock {
             self.doc.wrapErrors { $0.authors().map(Author.init(ffi:)) }
@@ -96,6 +99,7 @@ public final class Document: @unchecked Sendable {
     /// The actors that have made changes on behalf of an author.
     ///
     /// Returns an empty list if the author has no changes in this document.
+    /// Like ``heads()``, this commits any pending edits before answering.
     public func actors(for author: Author) -> [ActorId] {
         lock {
             self.doc.wrapErrors { $0.actorsForAuthor(author: author.ffi).map(ActorId.init(ffi:)) }
@@ -103,6 +107,8 @@ public final class Document: @unchecked Sendable {
     }
 
     /// The author an actor was acting for, if its changes were authored.
+    ///
+    /// Like ``heads()``, this commits any pending edits before answering.
     public func author(for actor: ActorId) -> Author? {
         lock {
             self.doc.wrapErrors { $0.authorForActor(actor: [UInt8](actor.data)).map(Author.init(ffi:)) }
