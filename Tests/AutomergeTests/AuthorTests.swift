@@ -65,10 +65,16 @@ class AuthorTests: XCTestCase {
 
         try doc1.merge(other: doc2)
         XCTAssertEqual(Set(doc1.authors), [alice, bob])
+        XCTAssertEqual(doc1.actors(for: alice), [doc1.actor])
         XCTAssertEqual(doc1.actors(for: bob), [doc2.actor])
 
-        let bobChanges = doc1.getHistory().compactMap { doc1.change(hash: $0) }.filter { $0.author == bob }
-        XCTAssertEqual(bobChanges.count, 1)
+        let changes = doc1.getHistory().compactMap { doc1.change(hash: $0) }
+        XCTAssertEqual(changes.count, 2)
+        XCTAssertEqual(changes.map(\.author), [alice, bob])
+        XCTAssertEqual(changes.map(\.actorId), [doc1.actor, doc2.actor])
+
+        let doc2Changes = doc2.getHistory().compactMap { doc2.change(hash: $0) }
+        XCTAssertEqual(doc2Changes.map(\.author), [alice, bob])
     }
 
     func testForkKeepsAuthorWithNewActor() throws {
