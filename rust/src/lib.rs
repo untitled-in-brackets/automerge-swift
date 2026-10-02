@@ -2,6 +2,8 @@ uniffi::include_scaffolding!("automerge");
 
 mod actor_id;
 use actor_id::ActorId;
+mod author;
+use author::Author;
 mod cursor;
 use cursor::{Cursor, Position};
 mod change;

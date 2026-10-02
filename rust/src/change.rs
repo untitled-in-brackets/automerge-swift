@@ -1,9 +1,10 @@
 use automerge as am;
 
-use crate::{ActorId, ChangeHash};
+use crate::{ActorId, Author, ChangeHash};
 
 pub struct Change {
     pub actor_id: ActorId,
+    pub author: Option<Author>,
     pub message: Option<String>,
     pub deps: Vec<ChangeHash>,
     pub timestamp: i64,
@@ -15,6 +16,7 @@ impl From<am::Change> for Change {
     fn from(mut value: am::Change) -> Self {
         Change {
             actor_id: value.actor_id().into(),
+            author: value.author().map(Author::from),
             message: value.message().map(str::to_owned),
             deps: value.deps().into_iter().map(ChangeHash::from).collect(),
             timestamp: value.timestamp(),
