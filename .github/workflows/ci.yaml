@@ -25,12 +25,13 @@ jobs:
             automergeFFI.xcframework.zip
             libuniffi_automerge.a
             libuniffi_automerge_threads.a
-          key: automerge-dependencies-{{ hashFiles(AutomergeUniffi/automerge.swift) }}-{{ hashFiles(AutomergeUniffi/automergeFFI.h) }}-{{ hashFiles(rust/Cargo.lock) }}-{{ hashFiles(rust/src/doc.rs) }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.90.0
-          default: true
+          # Everything the Rust build depends on, so any change to it rebuilds the library
+          # instead of restoring one built from older sources.
+          key: automerge-dependencies-${{ hashFiles('rust/Cargo.toml', 'rust/Cargo.lock', 'rust/build.rs', 'rust/uniffi-bindgen.rs', 'rust/src/**', 'scripts/build-xcframework.sh', 'scripts/compress-framework.sh', '.github/workflows/ci.yaml') }}
+      - name: Install Rust 1.90.0
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --no-self-update
+          rustup default 1.90.0
       - name: Build Automerge XCFramework and library
         if: steps.cache-automerge.outputs.cache-hit != 'true'
         run: ./scripts/build-xcframework.sh
@@ -107,25 +108,21 @@ jobs:
   rustfmt:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.90.0
-          default: true
-          components: rustfmt
+      - uses: actions/checkout@v5
+      - name: Install Rust 1.90.0
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
       - name: Clippy
         run: ./scripts/ci/rustfmt.sh
 
   clippy:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.90.0
-          default: true
-          components: clippy
+      - uses: actions/checkout@v5
+      - name: Install Rust 1.90.0
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component clippy --no-self-update
+          rustup default 1.90.0
       - name: Clippy
         run: ./scripts/ci/clippy.sh
