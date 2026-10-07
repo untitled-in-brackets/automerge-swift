@@ -4,6 +4,7 @@ use automerge::{self as am, sync::SyncDoc, CursorPosition};
 use automerge::{transaction::Transactable, ReadDoc};
 
 use crate::actor_id::ActorId;
+use crate::author::Author;
 use crate::cursor::Position;
 use crate::mark::{ExpandMark, KeyValue, Mark};
 use crate::patches::Patch;
@@ -69,6 +70,47 @@ impl Doc {
 
     pub fn set_actor(&self, actor: ActorId) {
         self.0.write().unwrap().set_actor(actor.into());
+    }
+
+    pub fn author(&self) -> Option<Author> {
+        self.0.read().unwrap().get_author().map(Author::from)
+    }
+
+    pub fn set_author(&self, author: Option<Author>) {
+        self.0
+            .write()
+            .unwrap()
+            .set_author(author.map(am::Author::from));
+    }
+
+    pub fn authors(&self) -> Vec<Author> {
+        self.committed()
+            .get_authors()
+            .iter()
+            .map(Author::from)
+            .collect()
+    }
+
+    pub fn actors_for_author(&self, author: Author) -> Vec<ActorId> {
+        self.committed()
+            .get_actors_for_author(&author.into())
+            .iter()
+            .map(ActorId::from)
+            .collect()
+    }
+
+    pub fn author_for_actor(&self, actor: ActorId) -> Option<Author> {
+        self.committed()
+            .get_author_for_actor(&actor.into())
+            .map(Author::from)
+    }
+
+    // actor<->author index only updates on commit; get_heads is the public way to
+    // close the pending transaction without creating an empty change
+    fn committed(&self) -> RwLockWriteGuard<'_, am::AutoCommit> {
+        let mut doc = self.0.write().unwrap();
+        doc.get_heads();
+        doc
     }
 
     pub fn put_in_map(&self, obj: ObjId, key: String, value: ScalarValue) -> Result<(), DocError> {
@@ -464,7 +506,7 @@ impl Doc {
             &obj,
             start as usize,
             delete as isize,
-            values.into_iter().map(|i| i.into()),
+            values.into_iter().map(am::ScalarValue::from),
         )?;
         Ok(())
     }

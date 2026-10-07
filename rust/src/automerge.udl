@@ -12,6 +12,9 @@ typedef sequence<u8> ChangeHash;
 typedef sequence<u8> ActorId;
 
 [Custom]
+typedef sequence<u8> Author;
+
+[Custom]
 typedef sequence<u8> Cursor;
 
 [Enum]
@@ -111,6 +114,7 @@ dictionary PathElement {
 
 dictionary Change {
     ActorId actor_id;
+    Author? author;
     string? message;
     sequence<ChangeHash> deps;
     i64 timestamp;
@@ -155,6 +159,11 @@ interface Doc {
     ActorId actor_id();
     TextEncoding text_encoding();
     void set_actor(ActorId actor);
+    Author? author();
+    void set_author(Author? author);
+    sequence<Author> authors();
+    sequence<ActorId> actors_for_author(Author author);
+    Author? author_for_actor(ActorId actor);
     Doc fork();
     [Throws=DocError]
     Doc fork_at(sequence<ChangeHash> heads);
