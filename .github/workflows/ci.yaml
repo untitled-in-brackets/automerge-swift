@@ -15,10 +15,10 @@ jobs:
       group: automerge-dependencies-${{ github.head_ref || github.run_id }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Cache Automerge XCFramework and library
         id: cache-automerge
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             automergeFFI.xcframework
@@ -37,7 +37,7 @@ jobs:
       - name: Compress Automerge XCFramework
         if: steps.cache-automerge.outputs.cache-hit != 'true'
         run: ./scripts/compress-framework.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: steps.cache-automerge.outputs.cache-hit != 'true'
         with:
           name: libuniffi_automerge
@@ -49,16 +49,16 @@ jobs:
     runs-on: macos-latest
     needs: automerge-dependencies
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Restore Automerge XCFramework and library
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             automergeFFI.xcframework
             automergeFFI.xcframework.zip
             libuniffi_automerge.a
             libuniffi_automerge_threads.a
-          key: automerge-dependencies-{{ hashFiles(AutomergeUniffi/automerge.swift) }}-{{ hashFiles(AutomergeUniffi/automergeFFI.h) }}-{{ hashFiles(rust/Cargo.lock) }}-{{ hashFiles(rust/src/doc.rs) }}
+          key: automerge-dependencies-${{ hashFiles('rust/Cargo.toml', 'rust/Cargo.lock', 'rust/build.rs', 'rust/uniffi-bindgen.rs', 'rust/src/**', 'scripts/build-xcframework.sh', 'scripts/compress-framework.sh', '.github/workflows/ci.yaml') }}
       - name: Get swift version
         run: swift --version
       - name: Swift tests
@@ -70,17 +70,30 @@ jobs:
     runs-on: ubuntu-latest
     needs: automerge-dependencies
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: bytecodealliance/actions/wasmtime/setup@v1
       - name: Restore Automerge XCFramework and library
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             automergeFFI.xcframework
             automergeFFI.xcframework.zip
             libuniffi_automerge.a
             libuniffi_automerge_threads.a
-          key: automerge-dependencies-{{ hashFiles(AutomergeUniffi/automerge.swift) }}-{{ hashFiles(AutomergeUniffi/automergeFFI.h) }}-{{ hashFiles(rust/Cargo.lock) }}-{{ hashFiles(rust/src/doc.rs) }}
+          key: automerge-dependencies-${{ hashFiles('rust/Cargo.toml', 'rust/Cargo.lock', 'rust/build.rs', 'rust/uniffi-bindgen.rs', 'rust/src/**', 'scripts/build-xcframework.sh', 'scripts/compress-framework.sh', '.github/workflows/ci.yaml') }}
+      # setup-swift v3.0.0-beta.1 verifies the Swiftly download before importing Swift's
+      # signing keys (swift-actions/setup-swift#798), so import them first. This keeps the
+      # signature check; remove it once a setup-swift release includes the fix.
+      - name: Import Swift signing keys
+        run: |
+          keys="$RUNNER_TEMP/swift-all-keys.asc"
+          curl -fsSL --compressed --retry 3 -o "$keys" https://www.swift.org/keys/all-keys.asc
+          # The file is sometimes served gzip-compressed; gzip -cdf passes plain text through unchanged.
+          if ! gzip -cdf "$keys" | gpg --import -; then
+            echo "::error::Could not import Swift's signing keys. Downloaded $(wc -c < "$keys") bytes starting with:"
+            head -c 256 "$keys" | od -c | head -16
+            exit 1
+          fi
       - uses: swift-actions/setup-swift@v3
         with:
           swift-version: "6.2.3"
