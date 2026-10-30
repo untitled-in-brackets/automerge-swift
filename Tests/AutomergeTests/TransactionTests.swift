@@ -112,6 +112,9 @@ class TransactionTests: XCTestCase {
         XCTAssertEqual(try loaded.get(obj: .ROOT, key: "b"), .Scalar(.Int(2)))
     }
 
+    // wasm32-wasip1 has no threads, and no Dispatch to drive them with: the lock this test exercises
+    // is a no-op there (see `Document.lock`).
+    #if !os(WASI)
     func testTransactIsNotSplitByConcurrentCommits() throws {
         final class Observed: @unchecked Sendable {
             var heads: Set<ChangeHash> = []
@@ -155,6 +158,7 @@ class TransactionTests: XCTestCase {
         let loaded = try Document(observed.saved)
         XCTAssertEqual(try loaded.get(obj: .ROOT, key: "c"), .Scalar(.Int(3)))
     }
+    #endif
 
     #if canImport(Combine)
     func testTransactPublishesOneUpdate() throws {
