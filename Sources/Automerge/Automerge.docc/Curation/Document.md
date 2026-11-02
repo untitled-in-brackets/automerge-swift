@@ -103,10 +103,15 @@
 - ``marksAt(obj:heads:)``
 - ``marksAt(obj:position:heads:)``
 
+### Committing changes
+
+- ``transact(message:timestamp:_:)``
+- ``commitWith(message:timestamp:)``
+- ``rollback()``
+
 ### Saving, forking, and merging documents
 
 - ``save()``
-- ``commitWith(message:timestamp:)``
 - ``encodeNewChanges()``
 - ``encodeChangesSince(heads:)``
 - ``applyEncodedChanges(encoded:)``

@@ -18,6 +18,15 @@ The set of `ChangeHash` that Automerge returns represent a discrete point in tim
 
 Unlike git, Automerge does not track additional metadata about the changes over time, such as who contributed any change, or at what time the change was initially created. 
 
+### Grouping edits into changes
+
+Edits you make to a document accumulate in a pending change until something commits it.
+``Document/commitWith(message:timestamp:)`` commits the pending edits with a message and timestamp, and ``Document/rollback()`` discards them instead.
+Reading ``Document/heads()``, calling ``Document/save()``, forking, merging, and syncing also commit the pending edits, without a message.
+
+To make sure a group of edits lands in the history as exactly one change, apply them with ``Document/transact(message:timestamp:_:)``.
+It commits what its body did as one change — or rolls it back if the body throws — and holds the document's lock while the body runs, so a save or sync on another thread can't commit part of the group early.
+
 ### Forking and Merging
 
 You can create a fork a document using ``Document/fork()``, or ``Document/forkAt(heads:)`` to get a fork of the document at a specific point in time.

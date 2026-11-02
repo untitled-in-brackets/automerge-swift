@@ -658,6 +658,8 @@ public protocol DocProtocol : AnyObject {
     
     func receiveSyncMessageWithPatches(state: SyncState, msg: [UInt8]) throws  -> [Patch]
     
+    func rollback()  -> UInt64
+    
     func save()  -> [UInt8]
     
     func setActor(actor: ActorId) 
@@ -1241,6 +1243,13 @@ open func receiveSyncMessageWithPatches(state: SyncState, msg: [UInt8])throws  -
     uniffi_uniffi_automerge_fn_method_doc_receive_sync_message_with_patches(self.uniffiClonePointer(),
         FfiConverterTypeSyncState.lower(state),
         FfiConverterSequenceUInt8.lower(msg),$0
+    )
+})
+}
+    
+open func rollback() -> UInt64 {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_uniffi_automerge_fn_method_doc_rollback(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -3757,6 +3766,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_automerge_checksum_method_doc_receive_sync_message_with_patches() != 42532) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_uniffi_automerge_checksum_method_doc_rollback() != 7206) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_uniffi_automerge_checksum_method_doc_save() != 20308) {

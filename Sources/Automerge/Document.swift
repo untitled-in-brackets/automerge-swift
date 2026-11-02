@@ -14,6 +14,8 @@ import Foundation
 /// ``AutomergeDecoder``, which provide support for mapping your own `Codable` types into an Automerge document.
 public final class Document: @unchecked Sendable {
     private var doc: WrappedDoc
+    /// Whether a ``transact(message:timestamp:_:)`` body is running. Only touched under `lock`.
+    private var isTransacting = false
 
     #if !os(WASI)
     let lock = NSRecursiveLock()
@@ -1056,6 +1058,89 @@ public final class Document: @unchecked Sendable {
         }
     }
 
+    /// Discard the edits in the auto-generated transaction instead of committing them.
+    ///
+    /// Edits accumulate in a pending change until it is committed, either explicitly with
+    /// ``commitWith(message:timestamp:)`` or implicitly by ``save()``, ``heads()``, ``fork()``,
+    /// merging, or syncing. Rolling back undoes the pending edits as if they were never made.
+    /// Changes that are already committed aren't affected.
+    ///
+    /// - Returns: The number of operations that were discarded.
+    @discardableResult
+    public func rollback() -> UInt64 {
+        lock {
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            return self.doc.wrapErrors { $0.rollback() }
+        }
+    }
+
+    /// Apply a group of edits to the document as a single change.
+    ///
+    /// Use `transact` when edits belong together in the document's history, for example everything
+    /// that makes up one user action:
+    ///
+    /// ```swift
+    /// try doc.transact(message: "Add a todo") { doc in
+    ///     let todo = try doc.insertObject(obj: todos, index: 0, ty: .Map)
+    ///     try doc.put(obj: todo, key: "title", value: .String("Buy milk"))
+    ///     try doc.put(obj: todo, key: "done", value: .Boolean(false))
+    /// }
+    /// ```
+    ///
+    /// The edits made in `body` are committed together as exactly one change carrying `message` and
+    /// `timestamp`, which is also the unit that is sent to other peers when syncing. The document is
+    /// locked for the duration of `body`, so a concurrent ``save()``, ``heads()``, or
+    /// ``receiveSyncMessage(state:message:)`` from another thread waits for the commit instead of
+    /// splitting the change in two. Edits that were already pending when `transact` was called are
+    /// committed on their own first, so the change holds only what `body` did. If `body` makes no
+    /// edits, no change is created. If `body` throws, its edits are rolled back and the error is
+    /// rethrown.
+    ///
+    /// Observers see the transaction as one update: `objectWillChange` is published once before `body`
+    /// runs and ``objectDidChange`` once after the change is committed (or rolled back), rather than
+    /// for each edit in between.
+    ///
+    /// Transactions don't nest. Inside `body`, read the document with the ordinary accessors rather
+    /// than ``heads()``, ``save()``, ``fork()``, or the merge and sync methods: those commit the
+    /// pending change immediately, which would end the transaction early. `body` must also not wait
+    /// on another thread that needs this document, since that thread is blocked until `body` returns.
+    ///
+    /// A change is atomic in the record and in delivery, not in the database sense: concurrent changes
+    /// from other peers still merge with it value by value rather than being accepted or rejected as a
+    /// whole.
+    ///
+    /// - Parameters:
+    ///   - message: An optional message to attach to the change.
+    ///   - timestamp: A timestamp to attach to the change, defaulting to `Date()`.
+    ///   - body: The edits to apply, which receives this document.
+    /// - Returns: The value that `body` returns.
+    public func transact<T>(
+        message: String? = nil,
+        timestamp: Date = Date(),
+        _ body: (Document) throws -> T
+    ) rethrows -> T {
+        try lock {
+            precondition(!isTransacting, "Document.transact can't be nested")
+            // Commit anything already pending so the transaction holds only body's edits. Reading
+            // the heads is how the core closes a pending change without creating an empty one.
+            self.doc.wrapErrors { _ = $0.heads() }
+            sendObjectWillChange()
+            defer { sendObjectDidChange() }
+            isTransacting = true
+            // Deferred later, so it runs first: the final sendObjectDidChange isn't suppressed.
+            defer { isTransacting = false }
+            do {
+                let result = try body(self)
+                commitWith(message: message, timestamp: timestamp)
+                return result
+            } catch {
+                rollback()
+                throw error
+            }
+        }
+    }
+
     /// Encode the Automerge document in a compressed binary format.
     ///
     /// - Returns: The data that represents all the changes within this document.
@@ -1413,10 +1498,13 @@ extension Document: ObservableObject {
 //            }
 //        }
 //        #endif
+        // transact publishes one pair for the whole change rather than one per edit.
+        guard !isTransacting else { return }
         objectWillChange.send()
     }
 
     fileprivate func sendObjectDidChange() {
+        guard !isTransacting else { return }
         objectDidChangeSubject.send()
     }
 }

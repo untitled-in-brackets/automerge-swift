@@ -617,6 +617,11 @@ impl Doc {
         doc.commit_with(options);
     }
 
+    // Discards the pending transaction's ops instead of committing them, returning how many
+    pub fn rollback(&self) -> u64 {
+        self.0.write().unwrap().rollback() as u64
+    }
+
     pub fn save(&self) -> Vec<u8> {
         let mut doc = self.0.write().unwrap();
         doc.save()

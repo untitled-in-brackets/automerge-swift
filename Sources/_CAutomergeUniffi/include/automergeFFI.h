@@ -562,6 +562,11 @@ void uniffi_uniffi_automerge_fn_method_doc_receive_sync_message(void*_Nonnull pt
 RustBuffer uniffi_uniffi_automerge_fn_method_doc_receive_sync_message_with_patches(void*_Nonnull ptr, void*_Nonnull state, RustBuffer msg, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_FN_METHOD_DOC_ROLLBACK
+#define UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_FN_METHOD_DOC_ROLLBACK
+uint64_t uniffi_uniffi_automerge_fn_method_doc_rollback(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_FN_METHOD_DOC_SAVE
 #define UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_FN_METHOD_DOC_SAVE
 RustBuffer uniffi_uniffi_automerge_fn_method_doc_save(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -1283,6 +1288,12 @@ uint16_t uniffi_uniffi_automerge_checksum_method_doc_receive_sync_message(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_CHECKSUM_METHOD_DOC_RECEIVE_SYNC_MESSAGE_WITH_PATCHES
 #define UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_CHECKSUM_METHOD_DOC_RECEIVE_SYNC_MESSAGE_WITH_PATCHES
 uint16_t uniffi_uniffi_automerge_checksum_method_doc_receive_sync_message_with_patches(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_CHECKSUM_METHOD_DOC_ROLLBACK
+#define UNIFFI_FFIDEF_UNIFFI_UNIFFI_AUTOMERGE_CHECKSUM_METHOD_DOC_ROLLBACK
+uint16_t uniffi_uniffi_automerge_checksum_method_doc_rollback(void
     
 );
 #endif
